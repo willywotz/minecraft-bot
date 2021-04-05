@@ -1,0 +1,14 @@
+{
+  "name": "bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "minecraft-data": "^2.82.2",
+    "mineflayer": "^3.6.0",
+    "mineflayer-auto-auth": "^1.0.0",
+    "mineflayer-pathfinder": "^1.6.1",
+    "mineflayer-statemachine": "^1.6.1",
+    "vec3": "^0.1.7"
+  }
+}
