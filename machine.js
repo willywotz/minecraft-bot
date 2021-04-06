@@ -10,7 +10,10 @@ const {
   BehaviorMineBlock,
   BehaviorGetClosestEntity,
   EntityFilters,
-  BehaviorPlaceBlock
+  BehaviorPlaceBlock,
+  BehaviorEquipItem,
+  BehaviorInteractBlock,
+  AbstractBehaviorInventory
 } = require('mineflayer-statemachine')
 const { Movements } = require('mineflayer-pathfinder')
 const { Vec3 } = require('vec3')
@@ -25,9 +28,14 @@ const bot = createBot({
 
 bot.once('spawn', function () {
   const targets = {}
+  targets.actives = {}
+  // targets.actives.farming = true
 
   const start = new BehaviorIdle
-  start.stateName = 'start'
+  start.stateName = 'Main Start'
+
+  const chat = new BehaviorIdle
+  chat.stateName = 'chat'
 
   const farming = farmer(this, targets)
 
@@ -35,29 +43,46 @@ bot.once('spawn', function () {
     new StateTransition({
       parent: start,
       child: farming,
-      shouldTransition: _ => true
-    })
+      shouldTransition: _ => targets.actives.farming
+    }),
+    new StateTransition({
+      parent: farming,
+      child: start,
+      shouldTransition: _ => farming.isFinished()
+    }),
   ]
+
+  bot.on('chat', (username, msg) => {
+    if (msg === 'farm') transitions[0].trigger();
+    if (msg === 'farm stop') transitions[1].trigger();
+  })
 
   const rootLayer = new NestedStateMachine(transitions, start)
   rootLayer.stateName = 'Main'
+
   const stateMachine = new BotStateMachine(bot, rootLayer)
   const webserver = new StateMachineWebserver(bot, stateMachine)
   webserver.startServer()
 })
 
 function farmer(bot, targets) {
-  this.harvestState = true
-  this.collectState = true
-  this.sowState = true
-
   const mcData = require('minecraft-data')(bot.version)
 
   const start = new BehaviorIdle
   start.stateName = 'Start'
 
+  const cleanUp = new BehaviorIdle
+  cleanUp.stateName = 'cleanUp'
+  cleanUp.onStateEntered = _ => {
+    this.harvestState = true
+    this.collectState = true
+    this.sowState = true
+    this.fertilizeState = true
+    targets.oldBlocks = {}
+  }
+
   const end = new BehaviorIdle
-  end.stateName = 'end'
+  end.stateName = 'End'
 
   const findBlockToHarvest = new BehaviorFindBlock(bot, targets)
   findBlockToHarvest.stateName = 'findBlockToHarvest'
@@ -95,43 +120,6 @@ function farmer(bot, targets) {
   moveToCollectItem.movements.blocksToAvoid.delete(mcData.blocksByName.wheat.id)
   moveToCollectItem.movements.blocksToAvoid.add(mcData.blocksByName.water.id)
 
-  const BehaviorFindSeedTowSow = function (bot, targets) {
-    this.stateName = 'FindSeedTowSow'
-    this.active = true
-    this.bot = bot
-    this.targets = targets
-    this.mcData = mcDataLoader(this.bot.version)
-  }
-  BehaviorFindSeedTowSow.prototype = Object.create(BehaviorIdle.prototype)
-  BehaviorFindSeedTowSow.prototype.constructor = BehaviorFindSeedTowSow
-  BehaviorFindSeedTowSow.prototype.onStateEntered = function () {
-    if (!this.targets.oldBlock) {
-      this.targets.item = this.bot.inventory.items().find(item => {
-        if (item.type === this.mcData.itemsByName.wheat_seeds.id) return true;
-        if (item.type === this.mcData.itemsByName.potato.id) return true;
-        if (item.type === this.mcData.itemsByName.carrot.id) return true;
-        if (item.type === this.mcData.itemsByName.beetroot_seeds.id) return true;
-        return false
-      })
-      return
-    }
-
-    const block = this.targets.oldBlock
-    this.targets.oldBlock = undefined
-    const { wheat, potatoes, carrots, beetroots } = this.mcData.blocksByName
-    const { wheat_seeds, potato, carrot, beetroot_seeds } = this.mcData.itemsByName
-    this.targets.item = this.bot.inventory.items().find(item => {
-      if (block.type === wheat.id && item.type === wheat_seeds.id) return true;
-      if (block.type === potatoes.id && item.type === potato.id) return true;
-      if (block.type === carrots.id && item.type === carrot.id) return true;
-      if (block.type === beetroots.id && item.type === beetroot_seeds.id) return true;
-      return false
-    })
-  }
-
-  const findSeedTowSow = new BehaviorFindSeedTowSow(bot, targets)
-  findSeedTowSow.stateName = 'findSeedTowSow'
-
   const findBlockToSow = new BehaviorFindBlock(bot, targets)
   findBlockToSow.stateName = 'findBlockToSow'
   findBlockToSow.blocks = [mcData.blocksByName.farmland.id]
@@ -149,6 +137,29 @@ function farmer(bot, targets) {
     }
   }
 
+  const findSeedToSow = new AbstractBehaviorInventory(bot, targets)
+  findSeedToSow.stateName = 'findSeedToSow'
+  findSeedToSow.onStateEntered = function () {
+    const botItems = this.bot.inventory.items()
+    if (!botItems) return;
+    const { wheat_seeds, carrot, potato, beetroot_seeds } = this.mcData.itemsByName
+    const items = [wheat_seeds, carrot, potato, beetroot_seeds].map(item => item.id)
+    const botItemsFiltered = botItems.filter(item => items.includes(item.type))
+    if (!botItemsFiltered) return;
+    const itemCompare = (a, b) => a.type < b.type ? -1 : (a.type > b.type ? 1 : 0)
+    const botItemsFilteredSorted = botItemsFiltered.sort(itemCompare)
+    const block = this.targets.oldBlocks[targets.position.offset(0, 1, 0)]
+    if (!block) return this.targets.item = botItemsFilteredSorted[0];
+    this.targets.oldBlocks[targets.position] = undefined;
+    const { wheat, carrots, potatoes, beetroots } = this.mcData.blocksByName
+    const blockAndItems = { [wheat.id]: wheat_seeds, [carrots.id]: carrot, [potatoes.id]: potato, [beetroots.id]: beetroot_seeds }
+    const findBlockItem = item => blockAndItems[block.type] && blockAndItems[block.type].id === item.type
+    this.targets.item = botItemsFilteredSorted.find(findBlockItem)
+  }
+
+  const equipSowItem = new BehaviorEquipItem(bot, targets)
+  equipSowItem.stateName = 'equipSowItem'
+
   const moveToSow = new BehaviorMoveTo(bot, targets)
   moveToSow.stateName = 'moveToSow'
   moveToSow.movements.canDig = false
@@ -160,19 +171,58 @@ function farmer(bot, targets) {
   sow.stateName = 'sow'
   sow.onStateEntered = function () {
     if (this.targets.item == null) return
-
-    this.bot.equip(this.targets.item, 'hand').catch(err => {})
-
     if (this.targets.position == null) return
-    if (this.targets.blockFace == null) return
 
     const block = this.bot.blockAt(this.targets.position)
     if (block == null || !this.bot.canSeeBlock(block)) return
 
-    this.bot.placeBlock(block, this.targets.blockFace).catch(err => {})
+    this.bot.placeBlock(block, new Vec3(0, 1, 0)).catch(err => {
+      if (globalSettings.debugMode) console.log(err);
+    })
+  }
+  sow.isFinished = function () {
+    const blockAbove = this.bot.blockAt(this.targets.position.offset(0, 1, 0))
+    return blockAbove && blockAbove.type !== 0
   }
 
+  const findBlockToFertilize = new BehaviorFindBlock(bot, targets)
+  findBlockToFertilize.stateName = 'findBlockToFertilize'
+  findBlockToFertilize.matchesBlock = block => {
+    const { wheat, potatoes, carrots, beetroots } = mcData.blocksByName
+    if (block.type === wheat.id && block.metadata < 7) return true;
+    if (block.type === potatoes.id && block.metadata < 7) return true;
+    if (block.type === carrots.id && block.metadata < 7) return true;
+    if (block.type === beetroots.id && block.metadata < 3) return true;
+    return false
+  }
+
+  const checkHasFertilizeItem = new AbstractBehaviorInventory(bot, targets)
+  checkHasFertilizeItem.stateName = 'checkHasFertilizeItem'
+  checkHasFertilizeItem.onStateEntered = function () {
+    this.targets.item = this.bot.inventory.items().find(item => {
+      return item.type === this.mcData.itemsByName.bone_meal.id
+    })
+  }
+
+  const equipFertilizeItem = new BehaviorEquipItem(bot, targets)
+  equipFertilizeItem.stateName = 'equipFertilizeItem'
+
+  const moveToFertilize = new BehaviorMoveTo(bot, targets)
+  moveToFertilize.stateName = 'moveToFertilize'
+  moveToFertilize.movements.canDig = false
+  moveToFertilize.movements.allowParkour = false
+  moveToFertilize.movements.blocksToAvoid.delete(mcData.blocksByName.wheat.id)
+  moveToFertilize.movements.blocksToAvoid.add(mcData.blocksByName.water.id)
+
+  const fertilize = new BehaviorInteractBlock(bot, targets)
+  fertilize.stateName = 'fertilize'
+
   const transitions = [
+    new StateTransition({
+      parent: cleanUp,
+      child: start,
+      shouldTransition: _ => true
+    }),
     new StateTransition({
       parent: start,
       child: findBlockToHarvest,
@@ -185,23 +235,18 @@ function farmer(bot, targets) {
     }),
     new StateTransition({
       parent: start,
-      child: findSeedTowSow,
+      child: findBlockToSow,
       shouldTransition: _ => this.sowState
+    }),
+    new StateTransition({
+      parent: start,
+      child: findBlockToFertilize,
+      shouldTransition: _ => this.fertilizeState
     }),
     new StateTransition({
       parent: start,
       child: end,
       shouldTransition: _ => true
-    }),
-    new StateTransition({
-      parent: end,
-      child: start,
-      shouldTransition: _ => true,
-      onTransition: _ => {
-        this.harvestState = true
-        this.collectState = true
-        this.sowState = true
-      }
     }),
     new StateTransition({
       parent: findBlockToHarvest,
@@ -217,8 +262,10 @@ function farmer(bot, targets) {
     new StateTransition({
       parent: moveToHarvest,
       child: harvest,
-      shouldTransition: _ => moveToHarvest.distanceToTarget() < 3,
-      onTransition: _ => { targets.oldBlock = bot.blockAt(targets.position) }
+      shouldTransition: _ => moveToHarvest.isFinished(),
+      onTransition: _ => {
+        targets.oldBlocks[targets.position] = bot.blockAt(targets.position)
+      }
     }),
     new StateTransition({
       parent: harvest,
@@ -242,23 +289,12 @@ function farmer(bot, targets) {
     }),
     new StateTransition({
       parent: moveToCollectItem,
-      child: findSeedTowSow,
+      child: findBlockToSow,
       shouldTransition: _ => moveToCollectItem.isFinished(),
       onTransition: _ => {
         targets.entity = undefined
         targets.position = undefined
       }
-    }),
-    new StateTransition({
-      parent: findSeedTowSow,
-      child: start,
-      shouldTransition: _ => targets.item === undefined,
-      onTransition: _ => { this.sowState = false }
-    }),
-    new StateTransition({
-      parent: findSeedTowSow,
-      child: findBlockToSow,
-      shouldTransition: _ => targets.item !== undefined
     }),
     new StateTransition({
       parent: findBlockToSow,
@@ -268,31 +304,89 @@ function farmer(bot, targets) {
     }),
     new StateTransition({
       parent: findBlockToSow,
-      child: moveToSow,
+      child: findSeedToSow,
       shouldTransition: _ => targets.position !== undefined
+    }),
+    new StateTransition({
+      parent: findSeedToSow,
+      child: start,
+      shouldTransition: _ => targets.item === undefined,
+      onTransition: _ => {
+        this.sowState = false
+        targets.position = undefined
+      }
+    }),
+    new StateTransition({
+      parent: findSeedToSow,
+      child: equipSowItem,
+      shouldTransition: _ => targets.item !== undefined
+    }),
+    new StateTransition({
+      parent: equipSowItem,
+      child: moveToSow,
+      shouldTransition: _ => !equipSowItem.wasEquipped
     }),
     new StateTransition({
       parent: moveToSow,
       child: sow,
       shouldTransition: _ => moveToSow.isFinished(),
-      onTransition: _ => { targets.blockFace = new Vec3(0, 1, 0) }
     }),
     new StateTransition({
       parent: sow,
-      child: end,
-      shouldTransition: _ => {
-        const blockAbove = bot.blockAt(targets.position.offset(0, 1, 0))
-        return blockAbove || blockAbove.type !== 0
-      },
+      child: cleanUp,
+      shouldTransition: _ => sow.isFinished,
       onTransition: _ => {
-        targets.blockFace = undefined
+        targets.item = undefined
+        targets.position = undefined
+      }
+    }),
+    new StateTransition({
+      parent: findBlockToFertilize,
+      child: start,
+      shouldTransition: _ => targets.position === undefined,
+      onTransition: _ => { this.fertilizeState = false }
+    }),
+    new StateTransition({
+      parent: findBlockToFertilize,
+      child: checkHasFertilizeItem,
+      shouldTransition: _ => targets.position !== undefined
+    }),
+    new StateTransition({
+      parent: checkHasFertilizeItem,
+      child: cleanUp,
+      shouldTransition: _ => targets.item === undefined,
+      onTransition: _ => {
+        this.fertilizeState = false
+        targets.position = undefined
+      }
+    }),
+    new StateTransition({
+      parent: checkHasFertilizeItem,
+      child: equipFertilizeItem,
+      shouldTransition: _ => targets.item !== undefined
+    }),
+    new StateTransition({
+      parent: equipFertilizeItem,
+      child: moveToFertilize,
+      shouldTransition: _ => !equipFertilizeItem.wasEquipped
+    }),
+    new StateTransition({
+      parent: moveToFertilize,
+      child: fertilize,
+      shouldTransition: _ => moveToFertilize.isFinished()
+    }),
+    new StateTransition({
+      parent: fertilize,
+      child: findBlockToFertilize,
+      shouldTransition: _ => true,
+      onTransition: _ => {
         targets.item = undefined
         targets.position = undefined
       }
     }),
   ]
 
-  const farmer = new NestedStateMachine(transitions, start)
+  const farmer = new NestedStateMachine(transitions, cleanUp, end)
   farmer.stateName = 'Farmer'
   return farmer
 }
