@@ -465,6 +465,11 @@ lodash.reduce@^4.6.0:
   resolved "https://registry.yarnpkg.com/lodash.reduce/-/lodash.reduce-4.6.0.tgz#f1ab6b839299ad48f784abbf476596f03b914d3b"
   integrity sha1-8atrg5KZrUj3hKu/R2WW8DuRTTs=
 
+lodash@^4.17.21:
+  version "4.17.21"
+  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#679591c564c3bffaae8454cf0b3df370c3d6911c"
+  integrity sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==
+
 macaddress@^0.5.1:
   version "0.5.1"
   resolved "https://registry.yarnpkg.com/macaddress/-/macaddress-0.5.1.tgz#5d717ad50337f96085655d5db06ebc60df11fc59"
@@ -501,6 +506,11 @@ mime@1.6.0:
   version "1.6.0"
   resolved "https://registry.yarnpkg.com/mime/-/mime-1.6.0.tgz#32cd9e5c64553bd58d19a568af452acff04981b1"
   integrity sha512-x0Vn8spI+wuJ1O6S7gnbaQg8Pxh4NNHb7KSINmEWKiPE4RKOplvijn+NkmYmmRgP68mc70j2EbeTFRsrswaQeg==
+
+minecraft-assets@^1.6.0:
+  version "1.8.0"
+  resolved "https://registry.yarnpkg.com/minecraft-assets/-/minecraft-assets-1.8.0.tgz#d6a261a90f3752b7da373a2cfaa92b1927448c41"
+  integrity sha512-oF4GzlTAtLRYzc55Y/AC4YbMCTB9r/qkdP4wmikwuxTOS0ZD+94wLeiNeJZ+An3bbDKai2MZiRBOeqxhg3klhQ==
 
 minecraft-data@^2.55.0, minecraft-data@^2.61.0, minecraft-data@^2.62.1, minecraft-data@^2.70.0, minecraft-data@^2.73.1, minecraft-data@^2.74.0, minecraft-data@^2.75.0, minecraft-data@^2.79.0, minecraft-data@^2.82.2:
   version "2.82.2"
@@ -568,6 +578,16 @@ mineflayer-statemachine@^1.6.1:
     prismarine-item "^1.4.0"
     socket.io "^3.0.0"
     vec3 "^0.1.5"
+
+mineflayer-web-inventory@^1.4.0:
+  version "1.4.0"
+  resolved "https://registry.yarnpkg.com/mineflayer-web-inventory/-/mineflayer-web-inventory-1.4.0.tgz#813ecc20216d3ce43c8c1e999faec8a172a5b5f8"
+  integrity sha512-YVtOHkYmE39TNioqk1NOUjOSB/fNuYiYsaAEWpxYVAA6Kszj2xINo0Nz2F8QCjF5CPF5HpPq1bHRvIkvTmgrbA==
+  dependencies:
+    express "^4.17.1"
+    lodash "^4.17.21"
+    minecraft-assets "^1.6.0"
+    socket.io "^3.1.1"
 
 mineflayer@^2.39.2:
   version "2.41.0"
@@ -943,7 +963,7 @@ socket.io-parser@~4.0.3:
     component-emitter "~1.3.0"
     debug "~4.3.1"
 
-socket.io@^3.0.0:
+socket.io@^3.0.0, socket.io@^3.1.1:
   version "3.1.2"
   resolved "https://registry.yarnpkg.com/socket.io/-/socket.io-3.1.2.tgz#06e27caa1c4fc9617547acfbb5da9bc1747da39a"
   integrity sha512-JubKZnTQ4Z8G4IZWtaAZSiRP3I/inpy8c/Bsx2jrwGrTbKeVU5xd6qkKMHpChYeM3dWZSO0QACiGK+obhBNwYw==
