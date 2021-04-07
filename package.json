@@ -1,7 +1,7 @@
 {
   "name": "bot",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "machine.js",
   "license": "MIT",
   "dependencies": {
     "minecraft-data": "^2.82.2",
@@ -9,7 +9,6 @@
     "mineflayer-auto-auth": "^1.0.0",
     "mineflayer-pathfinder": "^1.6.1",
     "mineflayer-statemachine": "^1.6.1",
-    "mineflayer-web-inventory": "^1.4.0",
     "vec3": "^0.1.7"
   }
 }

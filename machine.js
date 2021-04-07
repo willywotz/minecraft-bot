@@ -1,3 +1,6 @@
+const mineflayer = require('mineflayer')
+const { pathfinder, Movements } = require('mineflayer-pathfinder')
+const autoAuth = require('mineflayer-auto-auth')
 const {
   globalSettings,
   StateTransition,
@@ -15,12 +18,20 @@ const {
   BehaviorInteractBlock,
   AbstractBehaviorInventory
 } = require('mineflayer-statemachine')
-const { Movements } = require('mineflayer-pathfinder')
 const { Vec3 } = require('vec3')
 const mcDataLoader = require('minecraft-data')
-const { createBot } = require('./lib')
 
-globalSettings.debugMode = true
+globalSettings.debugMode = false
+
+function createBot(options) {
+  const bot = mineflayer.createBot(options)
+  bot.loadPlugin(pathfinder)
+  if (options.AutoAuth) bot.loadPlugin(autoAuth);
+  bot.on('error', e => { throw e })
+  bot.on('login', _ => console.log(`${bot.username} is connected.`))
+  bot.on('end', _ => console.log(`${bot.username} is disconnected.`))
+  return bot
+}
 
 const bot = createBot({
   username: 'hello'
