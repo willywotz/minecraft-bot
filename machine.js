@@ -20,7 +20,7 @@ const { Vec3 } = require('vec3')
 const mcDataLoader = require('minecraft-data')
 const { createBot } = require('./lib')
 
-globalSettings.debugMode = false
+globalSettings.debugMode = true
 
 const bot = createBot({
   username: 'hello'
@@ -59,14 +59,17 @@ bot.once('spawn', function () {
 
   const rootLayer = new NestedStateMachine(transitions, start)
   rootLayer.stateName = 'Main'
-
   const stateMachine = new BotStateMachine(bot, rootLayer)
   const webserver = new StateMachineWebserver(bot, stateMachine)
   webserver.startServer()
 })
 
 function farmer(bot, targets) {
-  const mcData = require('minecraft-data')(bot.version)
+  const mcData = mcDataLoader(bot.version)
+
+  function isFullInventory() {
+    return bot.inventory.emptySlotCount() < 3
+  }
 
   const start = new BehaviorIdle
   start.stateName = 'Start'
@@ -86,14 +89,15 @@ function farmer(bot, targets) {
 
   const findBlockToHarvest = new BehaviorFindBlock(bot, targets)
   findBlockToHarvest.stateName = 'findBlockToHarvest'
-  findBlockToHarvest.matchesBlock = block => {
-    const { wheat, potatoes, carrots, beetroots } = mcData.blocksByName
+  findBlockToHarvest.mcData = mcData
+  findBlockToHarvest.matchesBlock = function (block) {
+    const { wheat, potatoes, carrots, beetroots } = this.mcData.blocksByName
     if (block.type === wheat.id && block.metadata === 7) return true;
     if (block.type === potatoes.id && block.metadata === 7) return true;
     if (block.type === carrots.id && block.metadata === 7) return true;
     if (block.type === beetroots.id && block.metadata === 3) return true;
-    if (block.type === mcData.blocksByName.melon.id) return true;
-    if (block.type === mcData.blocksByName.pumpkin.id) return true;
+    if (block.type === this.mcData.blocksByName.melon.id) return true;
+    if (block.type === this.mcData.blocksByName.pumpkin.id) return true;
     return false
   }
 
@@ -187,8 +191,9 @@ function farmer(bot, targets) {
 
   const findBlockToFertilize = new BehaviorFindBlock(bot, targets)
   findBlockToFertilize.stateName = 'findBlockToFertilize'
-  findBlockToFertilize.matchesBlock = block => {
-    const { wheat, potatoes, carrots, beetroots } = mcData.blocksByName
+  findBlockToFertilize.mcData = mcData
+  findBlockToFertilize.matchesBlock = function (block) {
+    const { wheat, potatoes, carrots, beetroots } = this.mcData.blocksByName
     if (block.type === wheat.id && block.metadata < 7) return true;
     if (block.type === potatoes.id && block.metadata < 7) return true;
     if (block.type === carrots.id && block.metadata < 7) return true;
@@ -222,6 +227,11 @@ function farmer(bot, targets) {
       parent: cleanUp,
       child: start,
       shouldTransition: _ => true
+    }),
+    new StateTransition({
+      parent: start,
+      child: end,
+      shouldTransition: _ => isFullInventory()
     }),
     new StateTransition({
       parent: start,
