@@ -18,10 +18,11 @@ const {
   BehaviorInteractBlock,
   AbstractBehaviorInventory
 } = require('mineflayer-statemachine')
-const { Vec3 } = require('vec3')
+const v = require('vec3')
+const { Vec3 } = v
 const mcDataLoader = require('minecraft-data')
 
-globalSettings.debugMode = false
+globalSettings.debugMode = true
 
 function createBot(options) {
   const bot = mineflayer.createBot(options)
@@ -41,6 +42,10 @@ bot.once('spawn', function () {
   const targets = {}
   targets.actives = {}
   // targets.actives.farming = true
+  // targets.actives.chesting = true
+  targets.chests = {
+    [new Vec3(-66, 4, -15)]: Object.create(null)
+  }
 
   const start = new BehaviorIdle
   start.stateName = 'Main Start'
@@ -49,6 +54,7 @@ bot.once('spawn', function () {
   chat.stateName = 'chat'
 
   const farming = farmer(this, targets)
+  const chesting = chester(this, targets)
 
   const transitions = [
     new StateTransition({
@@ -61,11 +67,24 @@ bot.once('spawn', function () {
       child: start,
       shouldTransition: _ => farming.isFinished()
     }),
+    new StateTransition({
+      parent: start,
+      child: chesting,
+      shouldTransition: _ => targets.actives.chesting
+    }),
+    new StateTransition({
+      parent: chesting,
+      child: start,
+      shouldTransition: _ => chesting.isFinished()
+    }),
   ]
 
   bot.on('chat', (username, msg) => {
+    if (msg === 'come') bot.chat('/tp willywotz');
     if (msg === 'farm') transitions[0].trigger();
     if (msg === 'farm stop') transitions[1].trigger();
+    if (msg === 'chest') transitions[2].trigger();
+    if (msg === 'chest stop') transitions[3].trigger();
   })
 
   const rootLayer = new NestedStateMachine(transitions, start)
@@ -74,6 +93,163 @@ bot.once('spawn', function () {
   const webserver = new StateMachineWebserver(bot, stateMachine)
   webserver.startServer()
 })
+
+function chester(bot, targets) {
+  const mcData = mcDataLoader(bot.version)
+
+  function hasNotChest() {
+    const hasNotChest = Object.keys(targets.chests).length === 0
+    const isEmpty = chest => chest === null || !chest.isFull
+    const emptyChest = Object.values(targets.chests).find(isEmpty)
+    const hasNotEmptyChest = emptyChest === undefined
+    return hasNotChest || hasNotEmptyChest
+  }
+
+  function hasNotBotItem() {
+    return bot.inventory.items().length === 0
+  }
+
+  const start = new AbstractBehaviorInventory(bot, targets)
+  start.stateName = 'Start'
+  start.onStateEntered = function () {
+    this.targets.position = undefined
+  }
+
+  const end = new AbstractBehaviorInventory(bot, targets)
+  end.stateName = 'End'
+  end.onStateExited = function () {
+    const deleteIsFull = chest => { delete chest.isFull }
+    Object.keys(this.targets.chests).forEach(deleteIsFull)
+    if (targets.transitions) delete targets.transitions;
+  }
+
+  const checkHasChest = new AbstractBehaviorInventory(bot, targets)
+  checkHasChest.stateName = 'checkHasChest'
+  checkHasChest.v = v
+  checkHasChest.onStateEntered = function () {
+    const point = this.bot.entity.position.floored()
+    const positions = Object.keys(this.targets.chests).map(key => this.v(key))
+    const isNotFullChest = position => {
+      const chest = this.targets.chests[position]
+      return chest.isFull === undefined || chest.isFull === false
+    }
+    const positionsFiltered = positions.filter(position => {
+      return this.bot.blockAt(position) && isNotFullChest(position)
+    })
+    const positionCompare = (a, b) => a.distanceTo(point) - b.distanceTo(point)
+    const positionsFilteredSorted = positionsFiltered.sort(positionCompare)
+
+    this.targets.position = positionsFilteredSorted.length > 0
+      ? positionsFilteredSorted[0]
+      : undefined
+  }
+  checkHasChest.isFinished = function () {
+    return this.targets.position !== undefined
+  }
+
+  const moveToChest = new BehaviorMoveTo(bot, targets)
+  moveToChest.stateName = 'moveToChest'
+  moveToChest.movements.canDig = false
+  moveToChest.movements.blocksToAvoid.delete(mcData.blocksByName.wheat.id)
+  moveToChest.movements.blocksToAvoid.add(mcData.blocksByName.water.id)
+  moveToChest.distance = 1
+
+  const depositAll = new AbstractBehaviorInventory(bot, targets)
+  depositAll.stateName = 'depositAll'
+  depositAll.onStateEntered = function () {
+    this.isFinished = false
+    this.chest = undefined
+
+    const block = this.bot.blockAt(this.targets.position)
+    if (block == null || !this.bot.canSeeBlock(block)) return;
+
+    this.bot.openChest(block).then(chest => {
+      this.chest = chest
+
+      const botItems = _ => this.bot.inventory.items()
+      const chestItems = _ => chest.slots.slice(0, chest.inventoryStart)
+      const equalItemType = chest => bot => chest.type === bot.type
+      const matchesChestBotItem = botItems => item => botItems.find(equalItemType(item))
+      const botItemsSort = botItems => botItems.sort((a, b) => a.stackSize - b.stackSize)
+      const isEmptySlot = item => item === null
+      const hasEmptySlot = chestItems => chestItems.find(isEmptySlot) !== undefined
+      const hasItemDeposit = items => items.length > 0
+      const canDeposit = (chestItems, items) => hasEmptySlot(chestItems) && hasItemDeposit(items)
+      const isNotFullStack = item => item === null || item.count < item.stackSize
+      const chestNotFullStack = chestItems => chestItems.filter(isNotFullStack)
+      const depositItem = (chest, type) => chest.deposit(type, null, this.bot.inventory.count(type))
+
+      const hasNotEmptySlot = !hasEmptySlot(chestItems())
+      const canNotFillSlot = chestNotFullStack(chestItems()).find(item => {
+        return item === null || matchesChestBotItem(botItems())(item)
+      }) === undefined
+
+      if (hasNotEmptySlot && canNotFillSlot) {
+        this.targets.chests[this.targets.position].isFull = true
+        return
+      }
+
+      const matchItem = chestNotFullStack(chestItems()).find(item => {
+        return item !== null && matchesChestBotItem(botItems())(item)
+      })
+      if (matchItem) {
+        return depositItem(chest, matchItem.type)
+      }
+
+      if (canDeposit(chestItems(), botItems())) {
+        return depositItem(chest, botItemsSort(botItems())[0].type)
+      }
+    }).then(_ => {
+      this.isFinished = true
+      this.bot.closeWindow(this.chest)
+    }).catch(console.log)
+  }
+  depositAll.onStateExited = function () {
+    this.isFinished = false
+  }
+
+  const transitions = [
+    new StateTransition({
+      parent: start,
+      child: end,
+      shouldTransition: _ => hasNotChest()
+    }),
+    new StateTransition({
+      parent: start,
+      child: end,
+      shouldTransition: _ => hasNotBotItem()
+    }),
+    new StateTransition({
+      parent: start,
+      child: checkHasChest,
+      shouldTransition: _ => true
+    }),
+    new StateTransition({
+      parent: checkHasChest,
+      child: moveToChest,
+      shouldTransition: _ => checkHasChest.isFinished()
+    }),
+    new StateTransition({
+      parent: moveToChest,
+      child: depositAll,
+      shouldTransition: _ => moveToChest.isFinished()
+    }),
+    new StateTransition({
+      parent: depositAll,
+      child: start,
+      shouldTransition: _ => depositAll.isFinished
+    }),
+    new StateTransition({
+      parent: depositAll,
+      child: start,
+      shouldTransition: _ => hasNotBotItem()
+    }),
+  ]
+
+  const chester = new NestedStateMachine(transitions, start, end)
+  chester.stateName = 'Chester'
+  return chester
+}
 
 function farmer(bot, targets) {
   const mcData = mcDataLoader(bot.version)
